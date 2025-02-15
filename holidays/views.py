@@ -8,11 +8,12 @@ from . serializers import HolidaySerializer
 import requests
 from datetime import datetime
 from django.conf import settings
+from django.db import transaction
 
 class HolidayListAPIView(APIView):
     def get(self,request):
-        country_code = requests.query_params.get('country')
-        year = requests.query_params.get('year')
+        country_code = request.query_params.get('country')
+        year = request.query_params.get('year')
 
         if not country_code or not year:
             return Response({"error":"Country and year are required."},status=status.HTTP_400_BAD_REQUEST)
@@ -49,23 +50,27 @@ class HolidayListAPIView(APIView):
 
         ###Save holidays to DB###
 
-        for h in holidays_data:
-            try:
-                date_iso = h['date']['iso'].split('T')[0]
-                date = datetime.strptime(date_iso, '%Y-%m-%d').date()
-                type_str = ', '.join(h.get('type', []))[:50]
-                Holiday.objects.update_or_create(
-                    name=h['name'],
-                    country_code=country_code,
-                    date=date,
-                    defaults={
-                        'description': h.get('description', '')[:2000],
-                        'type': type_str,
-                        'year': year
-                    }
-                )
-            except KeyError:
-                continue
+        try:
+            with transaction.atomic():
+                for h in holidays_data:
+                    try:
+                        date_iso = h['date']['iso'].split('T')[0]
+                        date = datetime.strptime(date_iso, '%Y-%m-%d').date()
+                        type_str = ', '.join(h.get('type', []))[:50]
+                        Holiday.objects.update_or_create(
+                            name=h['name'],
+                            country_code=country_code,
+                            date=date,
+                            defaults={
+                                'description': h.get('description', '')[:2000],
+                                'type': type_str,
+                                'year': year
+                            }
+                        )
+                    except KeyError:
+                        continue
+        except Exception as e:
+            return Response({"error": f"Database error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         
         holidays = Holiday.objects.filter(country_code=country_code, year=year)
